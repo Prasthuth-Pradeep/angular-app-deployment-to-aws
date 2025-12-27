@@ -12,8 +12,44 @@ permissions:
   contents: read    # This is required for actions/checkout
 
 jobs:
-  deploy:
+  # --- JOB 1: SETUP ---
+  # Determines configuration based on the branch name
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      bucket_name: ${{ steps.config.outputs.BUCKET_NAME }}
+      cloudfront_id: ${{ steps.config.outputs.CLOUDFRONT_ID }}
+      api_url: ${{ steps.config.outputs.API_URL }}
+      app_url: ${{ steps.config.outputs.APP_URL }}
+      env_config: ${{ steps.config.outputs.ENV_CONFIG }}
+    steps:
+      - name: Set Variables
+        id: config
+        run: |
+          echo "Current Branch is: ${{ github.ref_name }}"
+
+          if [[ "${{ github.ref_name }}" == "dev" ]]; then
+            echo "BUCKET_NAME=test-angular-deployement" >> $GITHUB_OUTPUT
+            echo "CLOUDFRONT_ID=E20RW1CTQCQJMF" >> $GITHUB_OUTPUT
+            echo "API_URL=https://dev-api.com" >> $GITHUB_OUTPUT
+            echo "APP_URL=https://d1bzm4fxhkqgot.cloudfront.net" >> $GITHUB_OUTPUT
+            echo "ENV_CONFIG=production" >> $GITHUB_OUTPUT
+
+          else
+            echo "Branch not configured for deployment"
+            exit 1
+          fi
+
+  # --- JOB 2: DEPLOY ---
+  deploy:
+    needs: setup  # Waits for 'setup' to finish
+    runs-on: ubuntu-latest
+
+    # This creates the "Active Deployment" dashboard in GitHub
+    environment:
+      name: ${{ github.ref_name }}           # 'LGW', 'LTN', or 'dev'
+      url: ${{ needs.setup.outputs.app_url }} # The CloudFront URL
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -38,17 +74,15 @@ jobs:
           };
           EOF
 
-      # --- STEP: Quality Gates ---
+      # --- Quality Gates ---
       - name: Security Audit (SCA)
-        # Fails if High/Critical vulnerabilities found
         continue-on-error: false
         run: npm audit --audit-level=high
 
       - name: Build Angular App
         run: npm run build
 
-      # AWS Configuration
-      # @v4 recommended for OIDC
+      # --- AWS Authentication ---
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -60,6 +94,7 @@ jobs:
         run: |
           aws s3 sync ./dist/angular-app/browser s3://test-angular-deployement --delete
 
+      # --- Invalidate CloudFront ---
       - name: Invalidate CloudFront Cache
         run: |
-          aws cloudfront create-invalidation --distribution-id E20RW1CTQCQJMF --paths "/*"
+          aws cloudfront create-invalidation --distribution-id ${{ needs.setup.outputs.cloudfront_id }} --paths "/*"
