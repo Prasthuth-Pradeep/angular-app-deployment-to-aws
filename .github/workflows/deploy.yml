@@ -30,7 +30,7 @@ jobs:
       # --- STEP: Create Environment File (Clean Syntax) ---
       - name: Create Environment File
         run: |
-          cat <<EOF > src/environment.ts
+          cat <<EOF > environment.ts
           export const environment = {
             production: false,
             apiUrl: 'apiUrl.com',
