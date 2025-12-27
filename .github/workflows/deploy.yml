@@ -1,0 +1,48 @@
+name: Deploy Angular to AWS
+
+on:
+  push:
+    branches:
+      - dev
+
+# Permissions
+# GitHub needs permission to request the OIDC token from AWS.
+permissions:
+  id-token: write   # This is required for requesting the JWT
+  contents: read    # This is required for actions/checkout
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Angular App
+        run: npm run build
+
+      # AWS Configuration
+      # @v4 recommended for OIDC
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::798920797034:role/GitHubDeployRole
+          aws-region: us-east-1
+
+      - name: Sync to S3
+        # REMINDER: Replace 'YOUR_PROJECT_NAME' with your actual folder name in dist/
+        run: |
+          aws s3 sync ./dist/angular-app/browser s3://test-angular-deployement --delete
+
+      - name: Invalidate CloudFront Cache
+        run: |
+          aws cloudfront create-invalidation --distribution-id E20RW1CTQCQJMF --paths "/*"
