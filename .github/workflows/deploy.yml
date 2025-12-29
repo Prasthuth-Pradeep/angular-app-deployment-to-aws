@@ -4,16 +4,61 @@ on:
   push:
     branches:
       - dev
+      - dev-ltn
 
 # Permissions
 # GitHub needs permission to request the OIDC token from AWS.
 permissions:
-  id-token: write   # This is required for requesting the JWT
-  contents: read    # This is required for actions/checkout
+  id-token: write   # Required for requesting the JWT
+  contents: read    # Required for actions/checkout
 
 jobs:
-  deploy:
+  # --- JOB 1: SETUP ---
+  # Determines configuration based on the branch name
+  setup:
     runs-on: ubuntu-latest
+    outputs:
+      bucket_name: ${{ steps.config.outputs.BUCKET_NAME }}
+      cloudfront_id: ${{ steps.config.outputs.CLOUDFRONT_ID }}
+      api_url: ${{ steps.config.outputs.API_URL }}
+      app_url: ${{ steps.config.outputs.APP_URL }}
+      env_config: ${{ steps.config.outputs.ENV_CONFIG }}
+    steps:
+      - name: Set Variables
+        id: config
+        run: |
+          echo "Current Branch is: ${{ github.ref_name }}"
+
+          # Logic: Check if branch is 'dev' OR 'dev-ltn'
+          if [[ "${{ github.ref_name }}" == "dev" || "${{ github.ref_name }}" == "dev-ltn" ]]; then
+            
+            # Shared Infrastructure Configuration
+            echo "BUCKET_NAME=${{ vars.BUCKET_NAME }}" >> $GITHUB_OUTPUT
+            echo "CLOUDFRONT_ID=${{ vars.CLOUDFRONT_ID }}" >> $GITHUB_OUTPUT
+            echo "API_URL=${{ vars.API_URL }}" >> $GITHUB_OUTPUT
+            echo "APP_URL=${{ vars.APP_URL }}" >> $GITHUB_OUTPUT
+            
+            # Using 'production' config for both since they share the bucket
+            echo "ENV_CONFIG=production" >> $GITHUB_OUTPUT
+
+          else
+            echo "Branch not configured for deployment"
+            exit 1
+          fi
+
+  # --- JOB 2: DEPLOY ---
+  deploy:
+    needs: setup
+    runs-on: ubuntu-latest
+    
+    # Shows "Deploy to dev" or "Deploy to dev-ltn" in the visual graph
+    name: Deploy to ${{ github.ref_name }}
+
+    # Tracks history separately for 'dev' vs 'dev-ltn' in GitHub Sidebar
+    environment:
+      name: ${{ github.ref_name }}
+      url: ${{ needs.setup.outputs.app_url }}
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -27,22 +72,38 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      # --- STEP: Create Environment File ---
+      - name: Create Environment File
+        run: |
+          cat <<EOF > environment.ts
+          export const environment = {
+            production: false,
+            apiUrl: '${{ vars.API_URL }}',
+            someApiKey: '${{ secrets.API_KEY }}'
+          };
+          EOF
+
+      # --- Quality Gates ---
+      - name: Security Audit (SCA)
+        continue-on-error: false
+        run: npm audit --audit-level=high
+
       - name: Build Angular App
         run: npm run build
 
-      # AWS Configuration
-      # @v4 recommended for OIDC
+      # --- AWS Authentication ---
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::798920797034:role/GitHubDeployRole
-          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Sync to S3
-        # REMINDER: Replace 'YOUR_PROJECT_NAME' with your actual folder name in dist/
+        # UPDATED: Now uses the variable from the setup job
         run: |
-          aws s3 sync ./dist/angular-app/browser s3://test-angular-deployement --delete
+          aws s3 sync ./dist/angular-app/browser s3://${{ needs.setup.outputs.bucket_name }} --delete
 
+      # --- Invalidate CloudFront ---
       - name: Invalidate CloudFront Cache
         run: |
-          aws cloudfront create-invalidation --distribution-id E20RW1CTQCQJMF --paths "/*"
+          aws cloudfront create-invalidation --distribution-id ${{ needs.setup.outputs.cloudfront_id }} --paths "/*"
