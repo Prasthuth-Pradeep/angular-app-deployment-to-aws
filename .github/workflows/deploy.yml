@@ -33,10 +33,10 @@ jobs:
           if [[ "${{ github.ref_name }}" == "dev" || "${{ github.ref_name }}" == "dev-ltn" ]]; then
             
             # Shared Infrastructure Configuration
-            echo "BUCKET_NAME=test-angular-deployement" >> $GITHUB_OUTPUT
-            echo "CLOUDFRONT_ID=E20RW1CTQCQJMF" >> $GITHUB_OUTPUT
-            echo "API_URL=https://dev-api.com" >> $GITHUB_OUTPUT
-            echo "APP_URL=https://d1bzm4fxhkqgot.cloudfront.net" >> $GITHUB_OUTPUT
+            echo "BUCKET_NAME=${{ vars.BUCKET_NAME }}" >> $GITHUB_OUTPUT
+            echo "CLOUDFRONT_ID=${{ vars.CLOUDFRONT_ID }}" >> $GITHUB_OUTPUT
+            echo "API_URL=${{ vars.API_URL }}" >> $GITHUB_OUTPUT
+            echo "APP_URL=${{ vars.APP_URL }}" >> $GITHUB_OUTPUT
             
             # Using 'production' config for both since they share the bucket
             echo "ENV_CONFIG=production" >> $GITHUB_OUTPUT
@@ -78,8 +78,8 @@ jobs:
           cat <<EOF > environment.ts
           export const environment = {
             production: false,
-            apiUrl: 'apiUrl.com',
-            someApiKey: 'someApiKey.new'
+            apiUrl: '${{ vars.API_URL }}',
+            someApiKey: '${{ secrets.API_KEY }}'
           };
           EOF
 
@@ -95,8 +95,8 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::798920797034:role/GitHubDeployRole
-          aws-region: us-east-1
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Sync to S3
         # UPDATED: Now uses the variable from the setup job
