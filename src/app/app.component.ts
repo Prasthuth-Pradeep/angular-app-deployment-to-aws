@@ -9,7 +9,7 @@ import { environment } from '../../environment';
   styleUrl: './app.component.scss'
 })
 export class AppComponent implements OnInit {
-  title = 'angular-app';
+  title = 'angular-app new';
 
   constructor() {
     console.log(environment.apiUrl);
